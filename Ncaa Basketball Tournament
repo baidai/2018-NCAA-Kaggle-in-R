@@ -1,0 +1,315 @@
+#Includes conference, returned 66%
+ncaa.men<- unzip( "Stage2UpdatedDataFiles.zip")
+
+df_seeds <- read.csv("NCAATourneySeeds.csv")
+df_tour<- read.csv("NCAATourneyCompactResults.csv")
+#Pair team conference 
+tc <- read.csv('TeamConferences.csv')
+head(tc)
+
+
+head(df_seeds)
+head(df_tour)
+tail(df_tour)
+
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(caret)
+library(caTools)
+
+#Seperate No, only want the number
+df_seeds1 <- tidyr::separate(df_seeds, Seed, c("Let", "No"),sep = "(?<=[A-Z])(?=[0-9])", extra = 'drop', remove = TRUE) 
+#find NA in No and change them in seperate data set
+No.int <- df_seeds1
+No.int$No  <- as.integer(No.int$No)
+x.na <- (is.na(No.int$No))
+sum(x.na)
+xrow.na <- No.int[x.na,]
+dim(xrow.na)
+df.na<- df_seeds1[x.na,]
+head(df.na)
+xrow.na.no <- tidyr::separate(df.na, No, c('No','sm'), sep='(?<=[0-9])(?=[a-z])', remove = TRUE)
+head(xrow.na.no)
+x.new <- xrow.na.no[c(1,2,3,5)]
+head(x.new)
+df_seeds1[x.na,]<- x.new
+dim(df_seeds1)
+dim(df_seeds)
+tail(df_seeds1)
+
+#Change w01, to integer, will erase the w
+df_seeds1$No<- as.integer(df_seeds1$No)
+#see if any NA values
+sum(is.na(df_seeds1$No))
+#select columns needed for df_tour1
+df_tour1<- df_tour[c(1,3,5)]
+#make season numeric
+df_tour.m <- df_tour1%>% mutate(Season = as.numeric(as.character(Season)))
+
+#make a new data frame and change the column names
+df_winseeds <- df_seeds1[c(1,3,4)] 
+names(df_winseeds) <- c('Season', 'WSeed', 'WTeamID')
+df_loseseeds<- df_seeds1[c(1,3,4)]
+names(df_loseseeds) <- c('Season','LSeed', 'LTeamID')
+#Join data together to make full data set
+df_m<- left_join(df_tour1, df_winseeds, by = c('Season','WTeamID'))
+df_full <- left_join(df_m, df_loseseeds, by = c('Season', 'LTeamID'))
+#Add a SeedDiff column
+df_full$SeedDiff <- df_full$WSeed - df_full$LSeed
+head(df_full) 
+
+
+#create dataframe of the seed, conference and set diff for win and loss
+df_wseeds <- df_full[c(4,6)]
+df_wseeds$Result <- 1
+names(df_wseeds)<- c('Seed', 'SeedDiff', 'Result')
+head(df_wseeds)
+
+df_lseeds <- df_full[c(5,6)]
+#change seeddiff to negative
+df_lseeds$SeedDiff<--df_full$SeedDiff
+df_lseeds$Result <- 0
+names(df_lseeds)<- c('Seed', 'SeedDiff', 'Result')
+head(df_lseeds)
+
+#Combine into on long data frame
+df_predictions <- rbind(df_wseeds, df_lseeds)
+dim(df_predictions)
+
+
+#Split the data for testing NOT SURE WHY THIS IS NOT WORKING
+set.seed(3)
+split 
+splitIndex <- createDataPartition(df_predictions$Result, p = .75, list = FALSE, times = 1)
+df_train<- df_full[splitIndex,]
+df_test <- df_full[-splitIndex,]
+
+dim(df_train)
+dim(df_test)
+
+#another way to split the data
+#shuffle
+rows <- sample(nrow(df_predictions))
+#Random order
+df_predictions <- df_predictions[rows,]
+#Split
+split<- round(nrow(df_predictions) * .70)
+df_train <- df_predictions[1:split,]
+df_test<- df_predictions[(1+split) : nrow(df_predictions),]
+
+#glm model
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_predictions)
+p <- predict(model, df_predictions, type = 'response')
+p_class <- ifelse(p>.5, 1, 0)
+#test with confustion Matrix
+confusionMatrix(p_class, df_predictions[["Result"]])
+plot(model)
+# Make ROC curve
+colAUC(p, df_test$Result, plotROC = T)
+
+#Random Forest 
+model <- train(Result~SeedDiff, data = df_train, method = "ranger")
+p <- predict(model, df_test, type = 'response')
+p_class <- ifelse(p>.5, 1, 0)
+#test with confustion Matrix
+confusionMatrix(p_class, df_test[["Result"]])
+plot(model)
+
+
+#use box plot 
+
+df.lim <- boxplot.stats(df_predictions$SeedDiff)$stats[4]
+df.lim
+
+df.min <- boxplot.stats(df_predictions$SeedDiff)$stats[2]
+df.min
+
+df.box <-df_predictions$SeedDiff>df.min & df_predictions$SeedDiff<df.lim
+
+x <- df_predictions[df.box,]
+
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', x)
+p <- predict(model, df_test, type = 'response')
+p_class <- ifelse(p>.5, 1, 0)
+#test with confustion Matrix
+confusionMatrix(p_class, df_test[["Result"]])
+plot(model)
+# Make ROC curve
+colAUC(p, df_test$Result, plotROC = T)
+
+#Random Forest 
+model <- train(Result~SeedDiff, data = x, method = "ranger")
+p <- predict(model, df_test, type = 'response')
+p_class <- ifelse(p>.5, 1, 0)
+#test with confustion Matrix
+confusionMatrix(p_class, df_test[["Result"]])
+
+
+#Submission
+xrows <- df_seeds1$Season == 2018
+x.sub<- df_seeds1[xrows,]
+dim(x.sub)
+i<- row.85[c(2,3)]
+for (i in seq_along(row.85)) {
+  print(paste(row.85[[i]]))
+}
+
+output <- data.frame()
+for (i in seq_along(row.85)) {
+  print(paste(dfrow.85[c(2,3)]))
+}
+
+
+#make a new data frame and change the column names
+x.14 <- df_seeds1$Season == 2014
+df.2014 <- df_seeds1[x.14,]
+df_winseeds.14 <- df.2014[1:68, c(3,4)] 
+names(df_winseeds.14) <- c('WSeed', 'WTeamID')
+df_loseseeds.14<- df.2014[1:68, c(3,4)]
+names(df_loseseeds.14) <- c('LSeed', 'LTeamID')
+xy.14<- merge(df_winseeds.14, df_loseseeds.14)
+xy.14$SeedDiff <- xy.14$WSeed- xy.14$LSeed
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_train)
+p <- predict(model, xy.14, type = 'response')
+
+xy.14$Pred <- p
+head(xy.14)
+
+xy.14$Season <- 2014
+
+xy.14 <- unite(xy.14, "ID", Season, WTeamID, LTeamID, sep = "-")
+head(xy.14)
+
+f.14 <- xy.14[,c(2,5)]
+head(f.14)
+dim(f.14)
+
+xrows <- df_seeds1$Season == 2018
+x.sub<- df_seeds1[xrows,]
+dim(x.sub)
+x.18<- x.sub[, c(3,4)]
+df_winseeds.18 <- x.18
+names(df_winseeds.18) <- c('WSeed', 'WTeamID')
+df_lseeds.18 <- x.18
+names(df_lseeds.18) <- c('LSeed', 'LTeamID')
+xy.18<- merge(df_winseeds.18, df_lseeds.18)
+xy.18$SeedDiff <- xy.18$WSeed- xy.18$LSeed
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_predictions)
+p <- predict(model, xy.18, type = 'response')
+
+xy.18$Pred <- p
+head(xy.18)
+
+xy.18.c <- xy.18[c(3,4,1,2,5,7)]
+head(xy.18.c)
+
+same<- xy.18.c$LTeamID - xy.18.c$WTeamID >= 0
+sum(same)
+
+xy.18.cs <- xy.18[!same,]
+dim(xy.18.cs)
+dim(xy.18.c)
+xy.18.cs$Season <- 2018
+dim(xy.18.cs)
+
+
+z<-xy.18.cs[order(xy.18.cs$WTeamID, xy.18.cs$LTeamID, decreasing = FALSE), ]
+
+head(z)
+dim(z)
+
+z[2270:2285,]
+z[2278,]
+
+xy.18.u <- unite(z, "ID", Season, WTeamID, LTeamID, sep = "_")
+head(xy.18.u)
+
+sub18<- xy.18.u[c(2,6)]
+head(sub18)
+
+ncaa18.1 <- sub18[1:2278,]
+
+write.csv(ncaa18.1, file = 'ncaa18.3.csv', row.names = FALSE)
+
+
+
+df.2015 <- df_seeds1[x.15,]
+df_winseeds.15 <- df.2015[1:64, c(3,4)] 
+names(df_winseeds.15) <- c('WSeed', 'WTeamID')
+df_loseseeds.15<- df.2015[1:64, c(3,4)]
+names(df_loseseeds.15) <- c('LSeed', 'LTeamID')
+xy.15<- merge(df_winseeds.15, df_loseseeds.15)
+xy.15$SeedDiff <- xy.15$WSeed- xy.15$LSeed
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_train)
+p <- predict(model, xy.15, type = 'response')
+
+xy.15$Pred <- p
+head(xy.15)
+
+xy.15$Season <- 2015
+
+xy.15 <- unite(xy.15, "ID", Season, WTeamID, LTeamID, sep = "-")
+head(xy.15)
+
+f.15 <- xy.15[,c(2,5)]
+head(f.15)
+dim(f.15)
+
+x.16 <- df_seeds1$Season == 2016
+df.2016 <- df_seeds1[x.16,]
+df_winseeds.16 <- df.2016[1:68, c(3,4)] 
+names(df_winseeds.16) <- c('WSeed', 'WTeamID')
+df_loseseeds.16<- df.2016[1:68, c(3,4)]
+names(df_loseseeds.16) <- c('LSeed', 'LTeamID')
+xy.16<- merge(df_winseeds.16, df_loseseeds.16)
+xy.16$SeedDiff <- xy.16$WSeed- xy.16$LSeed
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_train)
+p <- predict(model, xy.16, type = 'response')
+
+xy.16$Pred <- p
+head(xy.16)
+
+xy.16$Season <- 2016
+
+xy.16 <- unite(xy.16, "ID", Season, WTeamID, LTeamID, sep = "-")
+head(xy.16)
+
+f.16 <- xy.16[,c(2,5)]
+head(f.16)
+dim(f.16)
+
+
+x.17 <- df_seeds1$Season == 2017
+df.2017 <- df_seeds1[x.17,]
+df_winseeds.17 <- df.2017[1:68, c(3,4)] 
+names(df_winseeds.17) <- c('WSeed', 'WTeamID')
+df_loseseeds.17<- df.2017[1:68, c(3,4)]
+names(df_loseseeds.17) <- c('LSeed', 'LTeamID')
+xy.17<- merge(df_winseeds.17, df_loseseeds.17)
+xy.17$SeedDiff <- xy.17$WSeed- xy.17$LSeed
+
+model <- glm(Result ~ SeedDiff, family = 'binomial', df_train)
+p <- predict(model, xy.17, type = 'response')
+
+xy.17$Pred <- p
+head(xy.17)
+
+xy.17$Season <- 2017
+
+xy.17 <- unite(xy.17, "ID", Season, WTeamID, LTeamID, sep = "-")
+head(xy.14)
+
+f.17 <- xy.17[,c(2,5)]
+head(f.17)
+
+
+
+final.pred <- rbind(f.14, f.15, f.16, f.17)
+head(final.pred)
+dim(final.pred)
